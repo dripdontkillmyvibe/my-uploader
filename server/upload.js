@@ -68,7 +68,7 @@ const puppeteerLaunchOptions = {
 };
 
 // --- Interactive API Endpoints ---
-app.post('/fetch-displays', async (req, res) => {
+app.post('/api/fetch-displays', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
 
@@ -92,7 +92,7 @@ app.post('/fetch-displays', async (req, res) => {
     }
 });
 
-app.post('/fetch-display-details', async (req, res) => {
+app.post('/api/fetch-display-details', async (req, res) => {
     const { username, password, displayValue } = req.body;
     if (!username || !password || !displayValue) return res.status(400).json({ message: 'Missing required fields.' });
 
@@ -130,7 +130,7 @@ app.post('/fetch-display-details', async (req, res) => {
 
 
 // --- Job-based API Endpoints ---
-app.post('/create-job', upload.array('images'), async (req, res) => {
+app.post('/api/create-job', upload.array('images'), async (req, res) => {
     const { userId, portalUser, portalPass, interval, cycle, displayValue } = req.body;
     const images = req.files.map(f => ({ path: f.path, originalname: f.originalname }));
 
@@ -160,7 +160,7 @@ app.post('/create-job', upload.array('images'), async (req, res) => {
     }
 });
 
-app.get('/job-status/:userId', async (req, res) => {
+app.get('/api/job-status/:userId', async (req, res) => {
     const { userId } = req.params;
     const client = await pool.connect();
     try {
@@ -178,7 +178,7 @@ app.get('/job-status/:userId', async (req, res) => {
     }
 });
 
-app.post('/stop-job/:jobId', async (req, res) => {
+app.post('/api/stop-job/:jobId', async (req, res) => {
     const { jobId } = req.params;
     if (!jobId) {
         return res.status(400).json({ message: 'Job ID is required.' });
