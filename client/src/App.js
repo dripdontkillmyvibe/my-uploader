@@ -2,6 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { User, KeyRound, UploadCloud, GripVertical, Clock, PlayCircle, X, LogIn, Activity, ListVideo, ImageIcon, ChevronRight, Loader2, AlertTriangle, StopCircle, Crop, RectangleHorizontal, RectangleVertical } from 'lucide-react';
 import ReactCrop from 'react-image-crop';
 
+// --- Define the API URL based on the environment ---
+// In production (Netlify), it uses the full URL from the environment variable.
+// In development, it's an empty string, so requests are relative paths handled by the proxy.
+const API_URL = process.env.NODE_ENV === 'production' ? process.env.REACT_APP_API_URL : '';
+
+
 // --- Error Boundary Component ---
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -157,7 +163,7 @@ export default function App() {
     setCurrentImageUrl(null);
     if (!displayValue) return;
     try {
-        const response = await fetch('/api/fetch-display-details', {
+        const response = await fetch(`${API_URL}/api/fetch-display-details`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: user, password: pass, displayValue }),
@@ -171,7 +177,7 @@ export default function App() {
     setStatus('processing');
     setMessage('Logging in and fetching your displays...');
     try {
-      const response = await fetch('/api/fetch-displays', {
+      const response = await fetch(`${API_URL}/api/fetch-displays`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: user, password: pass }),
@@ -234,7 +240,7 @@ export default function App() {
     if (appStep !== 'dashboard' || !dashboardUser) return;
     const fetchStatus = async () => {
       try {
-        const response = await fetch(`/api/job-status/${dashboardUser}`);
+        const response = await fetch(`${API_URL}/api/job-status/${dashboardUser}`);
         if(response.ok) setJobStatus(await response.json());
         else setJobStatus(null);
       } catch (error) { console.error("Failed to fetch job status", error); }
@@ -293,7 +299,7 @@ export default function App() {
     images.forEach(img => formData.append('images', img.file));
 
     try {
-        const response = await fetch('/api/create-job', {
+        const response = await fetch(`${API_URL}/api/create-job`, {
             method: 'POST',
             body: formData,
         });
@@ -311,7 +317,7 @@ export default function App() {
     if (!jobStatus || !jobStatus.id) return;
 
     try {
-        const response = await fetch(`/api/stop-job/${jobStatus.id}`, {
+        const response = await fetch(`${API_URL}/api/stop-job/${jobStatus.id}`, {
             method: 'POST',
         });
         if (response.ok) {
