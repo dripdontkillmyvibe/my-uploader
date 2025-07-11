@@ -157,7 +157,7 @@ export default function App() {
     setCurrentImageUrl(null);
     if (!displayValue) return;
     try {
-        const response = await fetch('https://my-uploader-backend.onrender.com/fetch-display-details', {
+        const response = await fetch('/api/fetch-display-details', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: user, password: pass, displayValue }),
@@ -171,7 +171,7 @@ export default function App() {
     setStatus('processing');
     setMessage('Logging in and fetching your displays...');
     try {
-      const response = await fetch('https://my-uploader-backend.onrender.com/fetch-displays', {
+      const response = await fetch('/api/fetch-displays', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: user, password: pass }),
@@ -234,7 +234,7 @@ export default function App() {
     if (appStep !== 'dashboard' || !dashboardUser) return;
     const fetchStatus = async () => {
       try {
-        const response = await fetch(`https://my-uploader-backend.onrender.com/job-status/${dashboardUser}`);
+        const response = await fetch(`/api/job-status/${dashboardUser}`);
         if(response.ok) setJobStatus(await response.json());
         else setJobStatus(null);
       } catch (error) { console.error("Failed to fetch job status", error); }
@@ -249,8 +249,8 @@ export default function App() {
     return () => {
       images.forEach(image => URL.revokeObjectURL(image.preview));
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array is intentional to run only on unmount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
   const handleDashboardLogin = () => {
     if (inputUser) {
@@ -293,7 +293,7 @@ export default function App() {
     images.forEach(img => formData.append('images', img.file));
 
     try {
-        const response = await fetch('https://my-uploader-backend.onrender.com/create-job', {
+        const response = await fetch('/api/create-job', {
             method: 'POST',
             body: formData,
         });
@@ -311,7 +311,7 @@ export default function App() {
     if (!jobStatus || !jobStatus.id) return;
 
     try {
-        const response = await fetch(`https://my-uploader-backend.onrender.com/stop-job/${jobStatus.id}`, {
+        const response = await fetch(`/api/stop-job/${jobStatus.id}`, {
             method: 'POST',
         });
         if (response.ok) {
@@ -487,7 +487,7 @@ export default function App() {
               </div>
 
               <div>
-                <h2 className="text-xl font-semibold text-slate-700 flex items-center mb-4">Upload New Images</h2>
+                <h2 className="text-xl font-semibold text-slate-700 flex items-center mb-4">Upload Queue</h2>
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center bg-slate-50"><UploadCloud className="mx-auto h-12 w-12 text-slate-400" /><input type="file" multiple onChange={handleFileChange} id="file-upload" className="hidden" /><label htmlFor="file-upload" className={`mt-2 block text-sm font-medium text-brand-blue ${isJobActive ? 'cursor-not-allowed' : 'cursor-pointer'}`}>Click to browse</label></div>
                 <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
                   {images && images.map((item, index) => {
