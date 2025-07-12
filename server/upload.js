@@ -263,9 +263,6 @@ async function processJob(job) {
               const fileInput = await page.waitForSelector(HIDDEN_FILE_INPUT_SELECTOR, { timeout: 30000 });
               console.log(`[Job ${job.id}] File input found. Uploading file: ${image.path}`);
               
-              const initialLogCount = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
-              console.log(`[Job ${job.id}] Initial log count: ${initialLogCount}`);
-
               await fileInput.uploadFile(image.path);
               console.log(`[Job ${job.id}] File selected for upload.`);
               
@@ -306,6 +303,15 @@ async function processJob(job) {
               console.log(`[Job ${job.id}] ${waitConfirmMsg}`);
               await client.query("UPDATE jobs SET progress = $1 WHERE id = $2", [waitConfirmMsg, job.id]);
               
+              // Wait a moment for the initial "uploading..." message to appear.
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              console.log(`[Job ${job.id}] Initial 3s wait finished. Now checking for final confirmation.`);
+
+              // Get the log count *after* the initial message has likely appeared.
+              const logCountAfterInitialMsg = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
+              console.log(`[Job ${job.id}] Log count after initial wait: ${logCountAfterInitialMsg}`);
+
+              // Now, wait for a *new* log entry beyond that count.
               await page.waitForFunction(
                 (selector, initialCount) => {
                     const logEntries = document.querySelectorAll(`${selector} p`);
@@ -313,11 +319,11 @@ async function processJob(job) {
                 },
                 { timeout: 120000 },
                 STATUS_LOG_SELECTOR,
-                initialLogCount
+                logCountAfterInitialMsg
               ).catch(e => {
-                  throw new Error('Timed out waiting for a new entry in the status log after upload.');
+                  throw new Error('Timed out waiting for a new confirmation entry in the status log.');
               });
-              console.log(`[Job ${job.id}] New log entry detected.`);
+              console.log(`[Job ${job.id}] New final confirmation log entry detected.`);
 
               const logs = await page.$eval(STATUS_LOG_SELECTOR, el => el.innerHTML);
               await client.query("UPDATE jobs SET logs = $1 WHERE id = $2", [logs, job.id]);
