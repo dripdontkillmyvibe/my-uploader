@@ -67,7 +67,7 @@ const puppeteerLaunchOptions = {
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
 };
 
-// --- Interactive API Endpoints ---
+// --- API Endpoints ---
 app.post('/api/fetch-displays', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
@@ -128,8 +128,6 @@ app.post('/api/fetch-display-details', async (req, res) => {
     }
 });
 
-
-// --- Job-based API Endpoints ---
 app.post('/api/create-job', upload.array('images'), async (req, res) => {
     const { userId, portalUser, portalPass, interval, cycle, displayValue } = req.body;
     const images = req.files.map(f => ({ path: f.path, originalname: f.originalname }));
@@ -248,7 +246,8 @@ async function processJob(job) {
               
               const fileInput = await page.waitForSelector(HIDDEN_FILE_INPUT_SELECTOR, { timeout: 30000 });
               
-              const initialLogContent = await page.$eval(STATUS_LOG_SELECTOR, el => el.innerHTML).catch(() => '');
+              // Get the number of log entries BEFORE uploading
+              const initialLogCount = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
 
               await fileInput.uploadFile(image.path);
               
@@ -283,23 +282,27 @@ async function processJob(job) {
               
               await client.query("UPDATE jobs SET progress = 'Waiting for upload confirmation...' WHERE id = $1", [job.id]);
               
+              // Wait for a NEW log entry to appear
               await page.waitForFunction(
-                (selector, initialContent) => {
-                    const logEl = document.querySelector(selector);
-                    return logEl && logEl.innerHTML !== initialContent;
+                (selector, initialCount) => {
+                    const logEntries = document.querySelectorAll(`${selector} p`);
+                    return logEntries.length > initialCount;
                 },
-                { timeout: 120000 },
+                { timeout: 120000 }, // 2 minute timeout
                 STATUS_LOG_SELECTOR,
-                initialLogContent
+                initialLogCount
               ).catch(e => {
-                  throw new Error('Timed out waiting for the status log to update after upload.');
+                  throw new Error('Timed out waiting for a new entry in the status log after upload.');
               });
 
+              // Now that a new log has appeared, let's check it and save the full log
               const logs = await page.$eval(STATUS_LOG_SELECTOR, el => el.innerHTML);
               await client.query("UPDATE jobs SET logs = $1 WHERE id = $2", [logs, job.id]);
 
-              if (logs.toLowerCase().includes('failed') || logs.toLowerCase().includes('error')) {
-                  throw new Error('The portal reported an error during the upload. Check the status log for details.');
+              const lastLogEntry = await page.$eval(`${STATUS_LOG_SELECTOR} p:last-child`, el => el.innerText.toLowerCase());
+
+              if (lastLogEntry.includes('failed') || lastLogEntry.includes('error')) {
+                  throw new Error(`The portal reported an error on the last log entry: "${lastLogEntry}"`);
               }
               
               const waitTime = (parseInt(settings.interval, 10) || 0) * 60 * 1000;
