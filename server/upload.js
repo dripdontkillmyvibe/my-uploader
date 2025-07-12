@@ -220,6 +220,7 @@ async function processJob(job) {
         await page.type(PASSWORD_SELECTOR, credentials.password);
         await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2' }), page.click(LOGIN_BUTTON_SELECTOR)]);
         
+        const dashboardUrl = page.url(); // Capture the dashboard URL after login
         let isFirstImageOfJob = true;
 
         do {
@@ -231,8 +232,8 @@ async function processJob(job) {
               }
 
               if (!isFirstImageOfJob) {
-                  await client.query("UPDATE jobs SET progress = 'Refreshing page for next upload...' WHERE id = $1", [job.id]);
-                  await page.reload({ waitUntil: 'networkidle2' });
+                  await client.query("UPDATE jobs SET progress = 'Resetting page for next upload...' WHERE id = $1", [job.id]);
+                  await page.goto(dashboardUrl, { waitUntil: 'networkidle2' });
               }
               isFirstImageOfJob = false;
 
@@ -246,7 +247,6 @@ async function processJob(job) {
               
               const fileInput = await page.waitForSelector(HIDDEN_FILE_INPUT_SELECTOR, { timeout: 30000 });
               
-              // Get the number of log entries BEFORE uploading
               const initialLogCount = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
 
               await fileInput.uploadFile(image.path);
@@ -282,20 +282,18 @@ async function processJob(job) {
               
               await client.query("UPDATE jobs SET progress = 'Waiting for upload confirmation...' WHERE id = $1", [job.id]);
               
-              // Wait for a NEW log entry to appear
               await page.waitForFunction(
                 (selector, initialCount) => {
                     const logEntries = document.querySelectorAll(`${selector} p`);
                     return logEntries.length > initialCount;
                 },
-                { timeout: 120000 }, // 2 minute timeout
+                { timeout: 120000 },
                 STATUS_LOG_SELECTOR,
                 initialLogCount
               ).catch(e => {
                   throw new Error('Timed out waiting for a new entry in the status log after upload.');
               });
 
-              // Now that a new log has appeared, let's check it and save the full log
               const logs = await page.$eval(STATUS_LOG_SELECTOR, el => el.innerHTML);
               await client.query("UPDATE jobs SET logs = $1 WHERE id = $2", [logs, job.id]);
 
