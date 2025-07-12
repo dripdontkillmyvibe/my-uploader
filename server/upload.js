@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer');
 const { Pool } = require('pg');
+const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -61,6 +62,12 @@ const HIDDEN_FILE_INPUT_SELECTOR = '#fileInput1';
 const UPLOAD_SUBMIT_BUTTON_SELECTOR = '#pushBtn1';
 const STATUS_LOG_SELECTOR = '#statuslog';
 
+// --- MTA GTFS Configuration ---
+// IMPORTANT: You must get your own API key from the MTA developer portal: https://api.mta.info/
+const MTA_API_KEY = process.env.MTA_API_KEY || 'YOUR_MTA_API_KEY_HERE';
+const MTA_FEED_URL = `https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs`;
+
+
 // --- Shared puppeteer launch options ---
 const puppeteerLaunchOptions = {
     headless: true,
@@ -68,6 +75,55 @@ const puppeteerLaunchOptions = {
 };
 
 // --- API Endpoints ---
+
+// NEW: Endpoint for Subway Widget Data
+app.get('/api/subway-schedule', async (req, res) => {
+    console.log('Fetching MTA subway data...');
+    if (MTA_API_KEY === 'YOUR_MTA_API_KEY_HERE') {
+        return res.status(500).json({ message: 'MTA API key is not configured on the server.' });
+    }
+    try {
+        const response = await fetch(MTA_FEED_URL, { headers: { 'x-api-key': MTA_API_KEY } });
+        if (!response.ok) {
+            throw new Error(`Failed to fetch MTA data: ${response.statusText}`);
+        }
+        const buffer = await response.arrayBuffer();
+        const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+        
+        // Example: Filter for Times Square - 42nd St (1, 2, 3, N, Q, R, W, S, 7 lines)
+        const stationId = 'R16'; 
+        const departures = { north: [], south: [] };
+
+        feed.entity.forEach(entity => {
+            if (entity.tripUpdate) {
+                const routeId = entity.tripUpdate.trip.routeId;
+                entity.tripUpdate.stopTimeUpdate.forEach(update => {
+                    if (update.stopId.startsWith(stationId)) {
+                        const direction = update.stopId.endsWith('N') ? 'north' : 'south';
+                        const arrivalTime = new Date(update.arrival.time.low * 1000);
+                        if (arrivalTime > new Date() && departures[direction].length < 10) {
+                            departures[direction].push({
+                                line: routeId,
+                                time: arrivalTime,
+                            });
+                        }
+                    }
+                });
+            }
+        });
+
+        Object.keys(departures).forEach(dir => departures[dir].sort((a, b) => a.time - b.time));
+        
+        console.log('Successfully fetched and processed MTA data.');
+        res.json(departures);
+
+    } catch (error) {
+        console.error('Error fetching subway schedule:', error);
+        res.status(500).json({ message: `Failed to fetch subway schedule: ${error.message}` });
+    }
+});
+
+
 app.post('/api/fetch-displays', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
@@ -303,15 +359,12 @@ async function processJob(job) {
               console.log(`[Job ${job.id}] ${waitConfirmMsg}`);
               await client.query("UPDATE jobs SET progress = $1 WHERE id = $2", [waitConfirmMsg, job.id]);
               
-              // Wait a moment for the initial "uploading..." message to appear.
               await new Promise(resolve => setTimeout(resolve, 3000));
               console.log(`[Job ${job.id}] Initial 3s wait finished. Now checking for final confirmation.`);
 
-              // Get the log count *after* the initial message has likely appeared.
               const logCountAfterInitialMsg = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
               console.log(`[Job ${job.id}] Log count after initial wait: ${logCountAfterInitialMsg}`);
 
-              // Now, wait for a *new* log entry beyond that count.
               await page.waitForFunction(
                 (selector, initialCount) => {
                     const logEntries = document.querySelectorAll(`${selector} p`);
