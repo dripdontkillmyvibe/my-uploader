@@ -42,7 +42,6 @@ async function initializeDb() {
 // --- Middleware & File Handling ---
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-// FIX: Use an absolute path for the upload directory to avoid ambiguity in the monorepo.
 const uploadDir = path.join(__dirname, 'images_to_upload');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 const storage = multer.diskStorage({
@@ -211,47 +210,66 @@ async function processJob(job) {
         const settings = job.settings;
         const images = job.images;
         
+        console.log(`[Job ${job.id}] Starting...`);
         await client.query("UPDATE jobs SET progress = 'Logging into portal...' WHERE id = $1", [job.id]);
         
         browser = await puppeteer.launch(puppeteerLaunchOptions);
         const page = await browser.newPage();
         
+        console.log(`[Job ${job.id}] Navigating to login page.`);
         await page.goto(LOGIN_URL, { waitUntil: 'networkidle2' });
         await page.type(USERNAME_SELECTOR, credentials.username);
         await page.type(PASSWORD_SELECTOR, credentials.password);
+        
+        console.log(`[Job ${job.id}] Submitting login form.`);
         await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2' }), page.click(LOGIN_BUTTON_SELECTOR)]);
         
-        const dashboardUrl = page.url(); // Capture the dashboard URL after login
+        const dashboardUrl = page.url();
+        console.log(`[Job ${job.id}] Logged in. Dashboard URL is: ${dashboardUrl}`);
+        
         let isFirstImageOfJob = true;
 
         do {
           for (let i = 0; i < images.length; i++) {
+              console.log(`[Job ${job.id}] Starting loop for image ${i + 1}.`);
               const jobCheckResult = await client.query('SELECT status FROM jobs WHERE id = $1', [job.id]);
               if (jobCheckResult.rows[0].status !== 'running') {
-                  console.log(`Job ${job.id} status is now '${jobCheckResult.rows[0].status}'. Halting execution.`);
+                  console.log(`[Job ${job.id}] Status changed to '${jobCheckResult.rows[0].status}'. Halting execution.`);
                   return;
               }
 
               if (!isFirstImageOfJob) {
-                  await client.query("UPDATE jobs SET progress = 'Resetting page for next upload...' WHERE id = $1", [job.id]);
+                  const resetMsg = `Resetting page for image ${i + 1}...`;
+                  console.log(`[Job ${job.id}] ${resetMsg}`);
+                  await client.query("UPDATE jobs SET progress = $1 WHERE id = $2", [resetMsg, job.id]);
                   await page.goto(dashboardUrl, { waitUntil: 'networkidle2' });
+                  console.log(`[Job ${job.id}] Page reset complete.`);
               }
               isFirstImageOfJob = false;
 
-              await client.query("UPDATE jobs SET progress = 'Selecting display...' WHERE id = $1", [job.id]);
+              const selectDisplayMsg = `Selecting display for image ${i + 1}...`;
+              console.log(`[Job ${job.id}] ${selectDisplayMsg}`);
+              await client.query("UPDATE jobs SET progress = $1 WHERE id = $2", [selectDisplayMsg, job.id]);
               await page.waitForSelector(DROPDOWN_SELECTOR, { timeout: 30000 });
               await page.select(DROPDOWN_SELECTOR, settings.displayValue);
+              console.log(`[Job ${job.id}] Display selected.`);
 
               const image = images[i];
               const progressMessage = `Uploading image ${i + 1} of ${images.length}: ${image.originalname}`;
+              console.log(`[Job ${job.id}] ${progressMessage}`);
               await client.query(`UPDATE jobs SET progress = $1 WHERE id = $2`, [progressMessage, job.id]);
               
+              console.log(`[Job ${job.id}] Waiting for file input selector...`);
               const fileInput = await page.waitForSelector(HIDDEN_FILE_INPUT_SELECTOR, { timeout: 30000 });
+              console.log(`[Job ${job.id}] File input found. Uploading file: ${image.path}`);
               
               const initialLogCount = await page.$$eval(`${STATUS_LOG_SELECTOR} p`, ps => ps.length).catch(() => 0);
+              console.log(`[Job ${job.id}] Initial log count: ${initialLogCount}`);
 
               await fileInput.uploadFile(image.path);
+              console.log(`[Job ${job.id}] File selected for upload.`);
               
+              console.log(`[Job ${job.id}] Waiting for upload button to be enabled...`);
               await page.waitForFunction(
                 (selector) => {
                   const el = document.querySelector(selector);
@@ -260,16 +278,19 @@ async function processJob(job) {
                 { timeout: 15000 },
                 UPLOAD_SUBMIT_BUTTON_SELECTOR
               );
+              console.log(`[Job ${job.id}] Upload button is enabled.`);
 
               let clickSuccessful = false;
               for (let attempt = 0; attempt < 10; attempt++) {
                   try {
+                      console.log(`[Job ${job.id}] Attempting to click upload button (Attempt ${attempt + 1})...`);
                       await page.click(UPLOAD_SUBMIT_BUTTON_SELECTOR);
                       clickSuccessful = true;
+                      console.log(`[Job ${job.id}] Click successful.`);
                       break;
                   } catch (e) {
                       if (e.message.includes('not clickable')) {
-                          console.log(`Attempt ${attempt + 1}: Upload button not clickable, retrying...`);
+                          console.log(`[Job ${job.id}] Attempt ${attempt + 1}: Upload button not clickable, retrying...`);
                           await new Promise(resolve => setTimeout(resolve, 1000));
                       } else {
                           throw e;
@@ -281,7 +302,9 @@ async function processJob(job) {
                   throw new Error(`The upload button was enabled but not clickable after 10 retries.`);
               }
               
-              await client.query("UPDATE jobs SET progress = 'Waiting for upload confirmation...' WHERE id = $1", [job.id]);
+              const waitConfirmMsg = 'Waiting for upload confirmation...';
+              console.log(`[Job ${job.id}] ${waitConfirmMsg}`);
+              await client.query("UPDATE jobs SET progress = $1 WHERE id = $2", [waitConfirmMsg, job.id]);
               
               await page.waitForFunction(
                 (selector, initialCount) => {
@@ -294,11 +317,14 @@ async function processJob(job) {
               ).catch(e => {
                   throw new Error('Timed out waiting for a new entry in the status log after upload.');
               });
+              console.log(`[Job ${job.id}] New log entry detected.`);
 
               const logs = await page.$eval(STATUS_LOG_SELECTOR, el => el.innerHTML);
               await client.query("UPDATE jobs SET logs = $1 WHERE id = $2", [logs, job.id]);
+              console.log(`[Job ${job.id}] Logs saved to database.`);
 
               const lastLogEntry = await page.$eval(`${STATUS_LOG_SELECTOR} p:last-child`, el => el.innerText.toLowerCase());
+              console.log(`[Job ${job.id}] Last log entry: "${lastLogEntry}"`);
 
               if (lastLogEntry.includes('failed') || lastLogEntry.includes('error')) {
                   throw new Error(`The portal reported an error on the last log entry: "${lastLogEntry}"`);
@@ -306,23 +332,30 @@ async function processJob(job) {
               
               const waitTime = (parseInt(settings.interval, 10) || 0) * 60 * 1000;
               if (waitTime > 0 && (i < images.length - 1 || settings.cycle)) { 
-                await client.query(`UPDATE jobs SET progress = 'Waiting for ${settings.interval} minute(s)...' WHERE id = $1`, [job.id]);
+                const waitMsg = `Waiting for ${settings.interval} minute(s)...`;
+                console.log(`[Job ${job.id}] ${waitMsg}`);
+                await client.query(`UPDATE jobs SET progress = $1 WHERE id = $2`, [waitMsg, job.id]);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
               }
           }
         } while (settings.cycle);
 
+        console.log(`[Job ${job.id}] All images processed successfully.`);
         await client.query("UPDATE jobs SET status = 'completed', progress = 'All images uploaded successfully.' WHERE id = $1", [job.id]);
     } catch (error) {
-        console.error(`Error processing job ${job.id}:`, error);
+        console.error(`[Job ${job.id}] Error processing job:`, error);
         const errorMessage = error.message.includes('click') || error.message.includes('clickable')
             ? `A button on the page was not clickable. The website layout may have changed or an overlay was present. (Selector: ${UPLOAD_SUBMIT_BUTTON_SELECTOR})`
             : error.message;
         await client.query("UPDATE jobs SET status = 'failed', progress = $2 WHERE id = $1", [job.id, `An error occurred: ${errorMessage}`]);
     } finally {
-        if (browser) await browser.close();
+        if (browser) {
+            console.log(`[Job ${job.id}] Closing browser.`);
+            await browser.close();
+        }
+        console.log(`[Job ${job.id}] Cleaning up image files.`);
         job.images.forEach(img => fs.unlink(img.path, (err) => {
-            if(err) console.error("Error deleting file:", img.path, err);
+            if(err) console.error(`[Job ${job.id}] Error deleting file:`, img.path, err);
         }));
         client.release();
     }
