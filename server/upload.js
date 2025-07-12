@@ -42,7 +42,8 @@ async function initializeDb() {
 // --- Middleware & File Handling ---
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-const uploadDir = 'images_to_upload';
+// FIX: Use an absolute path for the upload directory to avoid ambiguity in the monorepo.
+const uploadDir = path.join(__dirname, 'images_to_upload');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
