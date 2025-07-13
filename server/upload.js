@@ -43,7 +43,7 @@ async function initializeDb() {
 
 // --- Middleware & File Handling ---
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+const jsonBodyParser = express.json({ limit: '50mb' });
 const uploadDir = path.join(__dirname, 'images_to_upload');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 const storage = multer.diskStorage({
@@ -69,8 +69,9 @@ const puppeteerLaunchOptions = {
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
 };
 
-// --- API Endpoints ---
-app.post('/api/fetch-displays', async (req, res) => {
+// --- Interactive API Endpoints ---
+app.post('/api/fetch-displays', jsonBodyParser, async (req, res) => {
+    console.log('[MTA-WIDGET] Received request for /api/fetch-displays.');
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
 
@@ -144,7 +145,7 @@ app.post('/api/get-subway-data', async (req, res) => {
 });
 
 
-app.post('/api/fetch-display-details', async (req, res) => {
+app.post('/api/fetch-display-details', jsonBodyParser, async (req, res) => {
     const { username, password, displayValue } = req.body;
     if (!username || !password || !displayValue) return res.status(400).json({ message: 'Missing required fields.' });
 

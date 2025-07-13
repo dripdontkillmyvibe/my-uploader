@@ -13,10 +13,8 @@ const SubwayWidget = () => {
 
         try {
             const response = await fetch('/api/get-subway-data', { 
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                method: 'POST'
+                // No headers needed
             });
             const data = await response.json();
 
