@@ -6,23 +6,40 @@ const SubwayWidget = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const fetchTrainData = () => {
+    const fetchTrainData = async () => {
         setIsLoading(true);
         setError('');
         setTrainData(null);
 
-        // This is a placeholder for a real API call.
-        // We will replace this with a real data source later.
-        setTimeout(() => {
-            // Simulating a successful API response
-            setTrainData([
-                { line: 'A', direction: 'Uptown', arrival: '2 min' },
-                { line: 'C', direction: 'Uptown', arrival: '5 min' },
-                { line: 'E', direction: 'Downtown', arrival: '8 min' },
-                { line: 'A', direction: 'Downtown', arrival: '12 min' },
-            ]);
+        try {
+            const response = await fetch('/api/mta-status');
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to fetch train data.');
+            }
+
+            const now = new Date();
+            const arrivals = data.map(arrival => {
+                const arrivalTime = new Date(arrival.arrival);
+                const minutesUntil = Math.round((arrivalTime - now) / (1000 * 60));
+                return {
+                    line: arrival.routeId,
+                    // Note: The GTFS feed only gives us a stop ID (e.g., "R17").
+                    // A full implementation would map this to a human-readable name.
+                    // For now, we show the ID.
+                    direction: `Stop ID: ${arrival.stopId}`, 
+                    arrival: `${minutesUntil} min`
+                };
+            });
+
+            setTrainData(arrivals);
+        } catch (err) {
+            setError(err.message);
+            console.error(err);
+        } finally {
             setIsLoading(false);
-        }, 1500);
+        }
     };
 
     return (

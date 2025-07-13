@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer');
 const { Pool } = require('pg');
+const fetch = require('node-fetch');
+const MtaGtfsRealtimeBindings = require('mta-gtfs-realtime-bindings');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -91,6 +93,44 @@ app.post('/api/fetch-displays', async (req, res) => {
         if (browser) await browser.close();
     }
 });
+
+// --- MTA Subway Widget API Endpoint ---
+app.get('/api/mta-status', async (req, res) => {
+    // Corrected based on user feedback. This endpoint does not require an API key.
+    // Feed for N,Q,R,W lines. Other feeds are available for other lines.
+    const feedUrl = `https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw`;
+
+    try {
+        const response = await fetch(feedUrl); // No API key needed for this direct feed URL.
+
+        if (!response.ok) {
+            console.error('MTA API request failed:', response.status, await response.text());
+            return res.status(response.status).json({ message: 'Failed to fetch data from MTA.' });
+        }
+
+        const buffer = await response.arrayBuffer();
+        const feed = MtaGtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+
+        const arrivals = feed.entity
+            .filter(entity => entity.tripUpdate && entity.tripUpdate.stopTimeUpdate)
+            .flatMap(entity => 
+                entity.tripUpdate.stopTimeUpdate.map(update => ({
+                    routeId: entity.tripUpdate.trip.routeId,
+                    stopId: update.stopId,
+                    arrival: update.arrival ? new Date(update.arrival.time.low * 1000) : null,
+                }))
+            )
+            .filter(arrival => arrival.arrival && arrival.arrival > new Date()) // Only future arrivals
+            .sort((a, b) => a.arrival - b.arrival) // Sort by soonest
+            .slice(0, 10); // Limit to the next 10 arrivals
+
+        res.json(arrivals);
+    } catch (error) {
+        console.error('❌ Error fetching or parsing MTA data:', error);
+        res.status(500).json({ message: 'Server error while processing MTA data.' });
+    }
+});
+
 
 app.post('/api/fetch-display-details', async (req, res) => {
     const { username, password, displayValue } = req.body;
