@@ -12,7 +12,12 @@ const SubwayWidget = () => {
         setTrainData(null);
 
         try {
-            const response = await fetch('/api/get-subway-data', { method: 'POST' });
+            const response = await fetch('/api/get-subway-data', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
             const data = await response.json();
 
             if (!response.ok) {
