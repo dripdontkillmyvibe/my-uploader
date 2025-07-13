@@ -71,7 +71,6 @@ const puppeteerLaunchOptions = {
 
 // --- API Endpoints ---
 app.post('/api/fetch-displays', async (req, res) => {
-    console.log("FETCH DISPLAYS ENDPOINT - DEPLOYMENT TEST v2"); // Diagnostic log
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
 
@@ -97,38 +96,50 @@ app.post('/api/fetch-displays', async (req, res) => {
 
 // --- MTA Subway Widget API Endpoint ---
 app.get('/api/mta-status', async (req, res) => {
+    console.log('[MTA-WIDGET] Received request for /api/mta-status.');
     // Corrected based on user feedback. This endpoint does not require an API key.
     // Feed for N,Q,R,W lines. Other feeds are available for other lines.
     const feedUrl = `https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw`;
 
     try {
         const response = await fetch(feedUrl); // No API key needed for this direct feed URL.
+        console.log(`[MTA-WIDGET] Fetched from MTA. Status: ${response.status}`);
 
         if (!response.ok) {
-            console.error('MTA API request failed:', response.status, await response.text());
-            return res.status(response.status).json({ message: 'Failed to fetch data from MTA.' });
+            const errorText = await response.text();
+            console.error('[MTA-WIDGET] MTA API request failed:', response.status, errorText);
+            return res.status(response.status).json({ message: `Failed to fetch data from MTA: ${errorText}` });
         }
 
         const buffer = await response.arrayBuffer();
+        console.log(`[MTA-WIDGET] Received buffer of size: ${buffer.byteLength}`);
+        
         const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+        console.log('[MTA-WIDGET] Successfully decoded feed message.');
+        // Log a small sample of the feed to see its structure
+        if (feed.entity && feed.entity.length > 0) {
+            console.log('[MTA-WIDGET] Sample entity:', JSON.stringify(feed.entity[0], null, 2));
+        }
 
         const arrivals = feed.entity
-            .filter(entity => entity.tripUpdate && entity.tripUpdate.stopTimeUpdate)
+            .filter(entity => entity && entity.tripUpdate && entity.tripUpdate.stopTimeUpdate)
             .flatMap(entity => 
                 entity.tripUpdate.stopTimeUpdate.map(update => ({
-                    routeId: entity.tripUpdate.trip.routeId,
+                    routeId: entity.tripUpdate.trip ? entity.tripUpdate.trip.routeId : 'N/A',
                     stopId: update.stopId,
-                    arrival: update.arrival ? new Date(update.arrival.time.low * 1000) : null,
+                    arrival: update.arrival && update.arrival.time ? new Date(update.arrival.time.low * 1000) : null,
                 }))
             )
             .filter(arrival => arrival.arrival && arrival.arrival > new Date()) // Only future arrivals
             .sort((a, b) => a.arrival - b.arrival) // Sort by soonest
             .slice(0, 10); // Limit to the next 10 arrivals
-
+        
+        console.log(`[MTA-WIDGET] Processed ${arrivals.length} arrivals. Sending response.`);
         res.json(arrivals);
+
     } catch (error) {
-        console.error('❌ Error fetching or parsing MTA data:', error);
-        res.status(500).json({ message: 'Server error while processing MTA data.' });
+        console.error('❌ [MTA-WIDGET] CRITICAL ERROR in /api/mta-status:', error);
+        res.status(500).json({ message: 'Server error while processing MTA data.', details: error.message });
     }
 });
 
