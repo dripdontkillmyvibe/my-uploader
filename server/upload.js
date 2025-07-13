@@ -95,8 +95,8 @@ app.post('/api/fetch-displays', async (req, res) => {
 });
 
 // --- MTA Subway Widget API Endpoint ---
-app.get('/api/mta-status', async (req, res) => {
-    console.log('[MTA-WIDGET] Received request for /api/mta-status.');
+app.post('/api/get-subway-data', async (req, res) => {
+    console.log('[MTA-WIDGET] Received request for /api/get-subway-data.');
     // Corrected based on user feedback. This endpoint does not require an API key.
     // Feed for N,Q,R,W lines. Other feeds are available for other lines.
     const feedUrl = `https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw`;
