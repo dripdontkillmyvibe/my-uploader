@@ -71,6 +71,7 @@ const puppeteerLaunchOptions = {
 
 // --- API Endpoints ---
 app.post('/api/fetch-displays', async (req, res) => {
+    console.log("FETCH DISPLAYS ENDPOINT - DEPLOYMENT TEST v2"); // Diagnostic log
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
 
