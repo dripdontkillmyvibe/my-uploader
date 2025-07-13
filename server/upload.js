@@ -6,7 +6,7 @@ const fs = require('fs');
 const puppeteer = require('puppeteer');
 const { Pool } = require('pg');
 const fetch = require('node-fetch');
-const MtaGtfsRealtimeBindings = require('mta-gtfs-realtime-bindings');
+const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -109,7 +109,7 @@ app.get('/api/mta-status', async (req, res) => {
         }
 
         const buffer = await response.arrayBuffer();
-        const feed = MtaGtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+        const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
 
         const arrivals = feed.entity
             .filter(entity => entity.tripUpdate && entity.tripUpdate.stopTimeUpdate)
