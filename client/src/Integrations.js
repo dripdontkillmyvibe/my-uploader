@@ -1,5 +1,9 @@
 import React from 'react';
 
+// Define the API URL based on the environment, just like in App.js
+const API_URL = process.env.NODE_ENV === 'production' ? process.env.REACT_APP_API_URL : '';
+
+
 // This is a placeholder for the Slack logo. 
 // In a real app, you might use an SVG or an image file.
 const SlackLogo = () => (
@@ -19,7 +23,7 @@ const SlackLogo = () => (
 const SlackIntegrationCard = () => {
     // This now points to our backend OAuth endpoint
     const handleConnectClick = () => {
-        window.location.href = '/api/slack/oauth/start';
+        window.location.href = `${API_URL}/api/slack/oauth/start`;
     };
 
     return (
