@@ -7,6 +7,24 @@ const puppeteer = require('puppeteer');
 const { Pool } = require('pg');
 const fetch = require('node-fetch');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
+const { App, ExpressReceiver } = require('@slack/bolt');
+const axios = require('axios');
+
+// TODO: In Render, add SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET to environment variables
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+
+// Initialize Slack App with an Express Receiver
+const expressReceiver = new ExpressReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  endpoints: '/api/slack/events'
+});
+
+const slackApp = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  receiver: expressReceiver,
+});
+
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -35,7 +53,18 @@ async function initializeDb() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('Database initialized, "jobs" table is ready.');
+    
+    // Create 'slack_integrations' table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS slack_integrations (
+        slack_user_id VARCHAR(255) PRIMARY KEY,
+        dashboard_user_id VARCHAR(255) NOT NULL,
+        access_token VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    console.log('Database initialized, tables are ready.');
   } finally {
     client.release();
   }
@@ -51,6 +80,18 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 const upload = multer({ storage: storage });
+
+// --- Slack Event Listener ---
+slackApp.event('file_shared', async ({ event, client, logger }) => {
+  try {
+    // This is where the core logic will go in the next stage.
+    // We will look up the user, download the file, and create a job.
+    console.log(`Received a file_shared event for file: ${event.file_id} from user: ${event.user_id}`);
+  } catch (error) {
+    console.error(`Error handling file_shared event: ${error.message}`);
+  }
+});
+
 
 // --- Shared Constants ---
 const LOGIN_URL = 'https://wi-charge.c3dss.com/Login';
@@ -69,7 +110,9 @@ const puppeteerLaunchOptions = {
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
 };
 
-// --- Interactive API Endpoints ---
+// --- API Endpoints ---
+app.use('/api/slack/events', expressReceiver.router);
+
 app.post('/api/fetch-displays', jsonBodyParser, async (req, res) => {
     console.log('[MTA-WIDGET] Received request for /api/fetch-displays.');
     const { username, password } = req.body;
