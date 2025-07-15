@@ -20,10 +20,14 @@ const SlackLogo = () => (
 );
 
 
-const SlackIntegrationCard = () => {
-    // This now points to our backend OAuth endpoint
+const SlackIntegrationCard = ({ dashboardUser }) => {
+    // This now points to our backend OAuth endpoint, including the user ID
     const handleConnectClick = () => {
-        window.location.href = `${API_URL}/api/slack/oauth/start`;
+        if (!dashboardUser) {
+            alert("Could not identify the current user. Please try refreshing the page.");
+            return;
+        }
+        window.location.href = `${API_URL}/api/slack/oauth/start?userId=${dashboardUser}`;
     };
 
     return (
@@ -50,10 +54,10 @@ const SlackIntegrationCard = () => {
 };
 
 
-export default function IntegrationsDashboard() {
+export default function IntegrationsDashboard({ dashboardUser }) {
     return (
         <div className="space-y-8">
-            <SlackIntegrationCard />
+            <SlackIntegrationCard dashboardUser={dashboardUser} />
             {/* We can add more integrations here in the future */}
         </div>
     );

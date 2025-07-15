@@ -9,6 +9,7 @@ const fetch = require('node-fetch');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
 const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
+const crypto = require('crypto');
 
 // TODO: In Render, add SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET to environment variables
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -58,8 +59,17 @@ async function initializeDb() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS slack_integrations (
         slack_user_id VARCHAR(255) PRIMARY KEY,
-        dashboard_user_id VARCHAR(255) NOT NULL,
+        dashboard_user_id VARCHAR(255) NOT NULL UNIQUE,
         access_token VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create a table to store temporary OAuth states
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS oauth_state (
+        state_value VARCHAR(255) PRIMARY KEY,
+        dashboard_user_id VARCHAR(255) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -117,32 +127,74 @@ app.use('/api/slack/events', expressReceiver.router);
 // --- Slack OAuth Flow Endpoints ---
 
 // This is the URL the user will be redirected to from the "Add to Slack" button
-app.get('/api/slack/oauth/start', (req, res) => {
-  const slackAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:history,chat:write,files:read&user_scope=`;
-  res.writeHead(302, { Location: slackAuthUrl });
-  res.end();
+app.get('/api/slack/oauth/start', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) {
+    return res.status(400).send('<h1>Error</h1><p>A user ID must be provided to start the Slack integration.</p>');
+  }
+
+  const state = crypto.randomBytes(16).toString('hex');
+  const client = await pool.connect();
+  try {
+    // Store the state and associated user ID for verification later
+    await client.query('INSERT INTO oauth_state (state_value, dashboard_user_id) VALUES ($1, $2)', [state, userId]);
+    
+    const slackAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:history,chat:write,files:read&user_scope=&state=${state}`;
+    res.writeHead(302, { Location: slackAuthUrl });
+    res.end();
+  } catch (error) {
+    console.error('Error starting Slack OAuth flow:', error);
+    res.status(500).send('<h1>Error</h1><p>Could not start the Slack OAuth process. Please try again.</p>');
+  } finally {
+    client.release();
+  }
 });
 
 // After the user approves on Slack, they are sent back to this URL
 app.get('/api/slack/oauth/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
+
+  if (!state) {
+    return res.status(400).send('<h1>Error</h1><p>No state value was provided by Slack. Authorization failed.</p>');
+  }
+  
+  const client = await pool.connect();
   try {
+    // Verify the state value to prevent CSRF attacks
+    const stateResult = await client.query('SELECT dashboard_user_id FROM oauth_state WHERE state_value = $1', [state]);
+    if (stateResult.rows.length === 0) {
+      return res.status(403).send('<h1>Error</h1><p>Invalid state. Your authorization session may have expired. Please try again.</p>');
+    }
+    const { dashboard_user_id } = stateResult.rows[0];
+
     // Exchange the temporary code for a permanent access token
-    const result = await slackApp.client.oauth.v2.access({
+    const oauthResult = await slackApp.client.oauth.v2.access({
       client_id: process.env.SLACK_CLIENT_ID,
       client_secret: process.env.SLACK_CLIENT_SECRET,
       code: code,
     });
 
-    // TODO: This is where we will link the Slack user to the dashboard user.
-    // For now, we'll just log the result.
-    console.log('Slack OAuth successful:', result);
+    const slackUserId = oauthResult.authed_user.id;
+    const accessToken = oauthResult.access_token;
     
-    res.send('<h1>Slack integration successful!</h1><p>You can now close this window.</p>');
+    // Save the new integration, or update if it already exists for this dashboard user
+    await client.query(
+      `INSERT INTO slack_integrations (slack_user_id, dashboard_user_id, access_token)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (dashboard_user_id) DO UPDATE SET slack_user_id = $1, access_token = $3;`,
+      [slackUserId, dashboard_user_id, accessToken]
+    );
+
+    // Clean up the used state value
+    await client.query('DELETE FROM oauth_state WHERE state_value = $1', [state]);
+
+    res.send('<h1>Slack integration successful!</h1><p>Your account is now linked. You can close this window.</p>');
 
   } catch (error) {
     console.error('Slack OAuth callback error:', error);
     res.status(500).send('<h1>Error</h1><p>Something went wrong during the Slack integration. Please try again.</p>');
+  } finally {
+    client.release();
   }
 });
 

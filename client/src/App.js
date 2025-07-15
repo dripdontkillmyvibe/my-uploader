@@ -568,7 +568,7 @@ export default function App() {
             )}
             
             {activeTab === 'integrations' && (
-              <IntegrationsDashboard />
+              <IntegrationsDashboard dashboardUser={dashboardUser} />
             )}
             
           </div>
