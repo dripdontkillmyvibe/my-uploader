@@ -7,7 +7,7 @@ const puppeteer = require('puppeteer');
 const { Pool } = require('pg');
 const fetch = require('node-fetch');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
-const { App, ExpressReceiver } = require('@slack/bolt');
+const { App } = require('@slack/bolt');
 const axios = require('axios');
 const crypto = require('crypto');
 
@@ -15,15 +15,10 @@ const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 
-// Initialize Slack App with an Express Receiver
-const expressReceiver = new ExpressReceiver({
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  endpoints: '/api/slack/events'
-});
-
+// Initialize Slack App
 const slackApp = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  receiver: expressReceiver,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
 
@@ -218,9 +213,25 @@ slackApp.event('file_shared', async ({ event, client, logger }) => {
 
 // --- API Endpoints ---
 
-// The expressReceiver.router will handle all incoming requests from Slack
-// including the URL verification challenge.
-app.use('/api/slack/events', expressReceiver.router);
+// This new endpoint handles all incoming requests from Slack,
+// including the one-time URL verification challenge.
+app.post('/api/slack/events', express.json(), (req, res) => {
+  // Manually handle the URL verification challenge
+  if (req.body && req.body.type === 'url_verification') {
+    console.log('[SLACK-SETUP] Responding to URL verification challenge.');
+    res.status(200).send(req.body.challenge);
+    return;
+  }
+  
+  // For all other events, let the Slack app handler take over.
+  // We first need to acknowledge the event to prevent Slack from retrying.
+  res.status(200).send();
+
+  // Then process the event asynchronously.
+  slackApp.processEvent({ body: req.body, ack: () => {} }).catch((err) => {
+    console.error(err);
+  });
+});
 
 // --- Slack OAuth Flow Endpoints ---
 
@@ -690,5 +701,6 @@ initializeDb().then(() => {
     setInterval(checkAndProcessJobs, 5000);
     app.listen(port, () => {
         console.log(`🚀 Stateful automation server listening on port ${port}`);
+        console.log('⚡️ Slack Bolt event handler is ready.');
     });
 }).catch(e => console.error("Failed to initialize database:", e));
