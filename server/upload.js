@@ -41,6 +41,11 @@ const pool = new Pool({
 async function initializeDb() {
   const client = await pool.connect();
   try {
+    // TEMPORARY: Drop the table to force recreation with the correct schema.
+    // This will be removed after the next successful deployment.
+    await client.query('DROP TABLE IF EXISTS slack_integrations;');
+
+    // Create 'jobs' table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS jobs (
         id SERIAL PRIMARY KEY,
