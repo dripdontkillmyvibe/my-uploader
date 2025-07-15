@@ -96,6 +96,25 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+
+// --- Shared Constants ---
+const LOGIN_URL = 'https://wi-charge.c3dss.com/Login';
+const USERNAME_SELECTOR = '#username';
+const PASSWORD_SELECTOR = '#password';
+const LOGIN_BUTTON_SELECTOR = 'button[type="submit"]';
+const DROPDOWN_SELECTOR = '#display';
+const PREVIEW_AREA_SELECTOR = '#preview1';
+const HIDDEN_FILE_INPUT_SELECTOR = '#fileInput1';
+const UPLOAD_SUBMIT_BUTTON_SELECTOR = '#pushBtn1';
+const STATUS_LOG_SELECTOR = '#statuslog';
+
+// --- Shared puppeteer launch options ---
+const puppeteerLaunchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+};
+
+
 // --- Slack Event Listener ---
 slackApp.event('file_shared', async ({ event, client, logger }) => {
   try {
