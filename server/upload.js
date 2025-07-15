@@ -128,6 +128,7 @@ app.use('/api/slack/events', expressReceiver.router);
 
 // This is the URL the user will be redirected to from the "Add to Slack" button
 app.get('/api/slack/oauth/start', async (req, res) => {
+  console.log('[SLACK-OAUTH] Received request to start OAuth flow.');
   const { userId } = req.query;
   if (!userId) {
     return res.status(400).send('<h1>Error</h1><p>A user ID must be provided to start the Slack integration.</p>');
@@ -143,7 +144,7 @@ app.get('/api/slack/oauth/start', async (req, res) => {
     res.writeHead(302, { Location: slackAuthUrl });
     res.end();
   } catch (error) {
-    console.error('Error starting Slack OAuth flow:', error);
+    console.error('[SLACK-OAUTH] Error starting OAuth flow:', error);
     res.status(500).send('<h1>Error</h1><p>Could not start the Slack OAuth process. Please try again.</p>');
   } finally {
     client.release();
@@ -191,7 +192,11 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
     res.send('<h1>Slack integration successful!</h1><p>Your account is now linked. You can close this window.</p>');
 
   } catch (error) {
-    console.error('Slack OAuth callback error:', error);
+    // Enhanced error logging to see the specific message from Slack
+    console.error('[SLACK-OAUTH] callback error:', error);
+    if (error.data) {
+        console.error('[SLACK-OAUTH] Error data from Slack:', JSON.stringify(error.data, null, 2));
+    }
     res.status(500).send('<h1>Error</h1><p>Something went wrong during the Slack integration. Please try again.</p>');
   } finally {
     client.release();
@@ -200,7 +205,6 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
 
 
 app.post('/api/fetch-displays', jsonBodyParser, async (req, res) => {
-    console.log('[MTA-WIDGET] Received request for /api/fetch-displays.');
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
 
