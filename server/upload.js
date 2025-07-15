@@ -23,44 +23,6 @@ const expressReceiver = new ExpressReceiver({
 const slackApp = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver: expressReceiver,
-  // Add the following custom routes for the OAuth flow
-  customRoutes: [
-    {
-      path: '/api/slack/oauth/start',
-      method: ['GET'],
-      handler: (req, res) => {
-        // This is the URL the user will be redirected to
-        const slackAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:history,chat:write,files:read&user_scope=`;
-        res.writeHead(302, { Location: slackAuthUrl });
-        res.end();
-      }
-    },
-    {
-      path: '/api/slack/oauth/callback',
-      method: ['GET'],
-      handler: async (req, res) => {
-        const { code } = req.query;
-        try {
-          // Exchange the temporary code for a permanent access token
-          const result = await slackApp.client.oauth.v2.access({
-            client_id: process.env.SLACK_CLIENT_ID,
-            client_secret: process.env.SLACK_CLIENT_SECRET,
-            code: code,
-          });
-
-          // TODO: This is where we will link the Slack user to the dashboard user.
-          // For now, we'll just log the result.
-          console.log('Slack OAuth successful:', result);
-          
-          res.send('<h1>Slack integration successful!</h1><p>You can now close this window.</p>');
-
-        } catch (error) {
-          console.error('Slack OAuth callback error:', error);
-          res.status(500).send('<h1>Error</h1><p>Something went wrong during the Slack integration. Please try again.</p>');
-        }
-      }
-    }
-  ]
 });
 
 
@@ -150,6 +112,40 @@ const puppeteerLaunchOptions = {
 
 // --- API Endpoints ---
 app.use('/api/slack/events', expressReceiver.router);
+
+
+// --- Slack OAuth Flow Endpoints ---
+
+// This is the URL the user will be redirected to from the "Add to Slack" button
+app.get('/api/slack/oauth/start', (req, res) => {
+  const slackAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:history,chat:write,files:read&user_scope=`;
+  res.writeHead(302, { Location: slackAuthUrl });
+  res.end();
+});
+
+// After the user approves on Slack, they are sent back to this URL
+app.get('/api/slack/oauth/callback', async (req, res) => {
+  const { code } = req.query;
+  try {
+    // Exchange the temporary code for a permanent access token
+    const result = await slackApp.client.oauth.v2.access({
+      client_id: process.env.SLACK_CLIENT_ID,
+      client_secret: process.env.SLACK_CLIENT_SECRET,
+      code: code,
+    });
+
+    // TODO: This is where we will link the Slack user to the dashboard user.
+    // For now, we'll just log the result.
+    console.log('Slack OAuth successful:', result);
+    
+    res.send('<h1>Slack integration successful!</h1><p>You can now close this window.</p>');
+
+  } catch (error) {
+    console.error('Slack OAuth callback error:', error);
+    res.status(500).send('<h1>Error</h1><p>Something went wrong during the Slack integration. Please try again.</p>');
+  }
+});
+
 
 app.post('/api/fetch-displays', jsonBodyParser, async (req, res) => {
     console.log('[MTA-WIDGET] Received request for /api/fetch-displays.');
