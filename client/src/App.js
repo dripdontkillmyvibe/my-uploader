@@ -568,7 +568,7 @@ export default function App() {
             )}
             
             {activeTab === 'integrations' && (
-              <IntegrationsDashboard dashboardUser={dashboardUser} />
+              dashboardUser ? <IntegrationsDashboard dashboardUser={dashboardUser} /> : <p className="text-center text-slate-500">Loading user information...</p>
             )}
             
           </div>

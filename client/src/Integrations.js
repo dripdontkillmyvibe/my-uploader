@@ -23,7 +23,8 @@ const SlackLogo = () => (
 const SlackIntegrationCard = ({ dashboardUser }) => {
     // This now points to our backend OAuth endpoint, including the user ID
     const handleConnectClick = () => {
-        if (!dashboardUser) {
+        // More robust check to ensure we have a non-empty string.
+        if (typeof dashboardUser !== 'string' || dashboardUser.length === 0) {
             alert("Could not identify the current user. Please try refreshing the page.");
             return;
         }
