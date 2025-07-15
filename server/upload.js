@@ -41,10 +41,6 @@ const pool = new Pool({
 async function initializeDb() {
   const client = await pool.connect();
   try {
-    // TEMPORARY: Drop the table to force recreation with the correct schema.
-    // This will be removed after the next successful deployment.
-    await client.query('DROP TABLE IF EXISTS slack_integrations;');
-
     // Create 'jobs' table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -190,6 +186,8 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
        ON CONFLICT (dashboard_user_id) DO UPDATE SET slack_user_id = $1, access_token = $3;`,
       [slackUserId, dashboard_user_id, accessToken]
     );
+
+    console.log(`[SLACK-OAUTH] Successfully linked Slack user ${slackUserId} to dashboard user ${dashboard_user_id}.`);
 
     // Clean up the used state value
     await client.query('DELETE FROM oauth_state WHERE state_value = $1', [state]);
