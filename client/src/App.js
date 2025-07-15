@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { User, KeyRound, UploadCloud, GripVertical, Clock, PlayCircle, X, LogIn, Activity, ListVideo, ImageIcon, ChevronRight, Loader2, AlertTriangle, StopCircle, Crop, RectangleHorizontal, RectangleVertical, LayoutGrid } from 'lucide-react';
+import { User, KeyRound, UploadCloud, GripVertical, Clock, PlayCircle, X, LogIn, Activity, ListVideo, ImageIcon, ChevronRight, Loader2, AlertTriangle, StopCircle, Crop, RectangleHorizontal, RectangleVertical, LayoutGrid, Link } from 'lucide-react';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import WidgetsDashboard from './Widgets'; // Import the new component
+import IntegrationsDashboard from './Integrations'; // Import the new component
 
 // --- Define the API URL based on the environment ---
 // In production (Netlify), it uses the full URL from the environment variable.
@@ -156,7 +157,7 @@ export default function App() {
   const [message, setMessage] = useState('');
   
   const [editingImage, setEditingImage] = useState(null);
-  const [activeTab, setActiveTab] = useState('automation'); // 'automation' or 'widgets'
+  const [activeTab, setActiveTab] = useState('automation'); // 'automation', 'widgets', or 'integrations'
 
   const dragItem = useRef(null);
   const dragOverItem = useRef(null);
@@ -462,6 +463,10 @@ export default function App() {
                     <LayoutGrid className="w-5 h-5" />
                     <span>Widgets</span>
                 </button>
+                <button onClick={() => setActiveTab('integrations')} className={`flex items-center space-x-2 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === 'integrations' ? 'border-b-2 border-brand-blue text-brand-blue' : 'text-slate-500 hover:bg-slate-100'}`}>
+                    <Link className="w-5 h-5" />
+                    <span>Integrations</span>
+                </button>
             </div>
 
             {/* --- Conditional Content --- */}
@@ -560,6 +565,10 @@ export default function App() {
             
             {activeTab === 'widgets' && (
               <WidgetsDashboard />
+            )}
+            
+            {activeTab === 'integrations' && (
+              <IntegrationsDashboard />
             )}
             
           </div>
