@@ -41,6 +41,9 @@ const pool = new Pool({
 async function initializeDb() {
   const client = await pool.connect();
   try {
+    // TEMPORARY: Drop the table to force recreation with the correct schema.
+    await client.query('DROP TABLE IF EXISTS slack_integrations;');
+
     // Create 'jobs' table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -62,6 +65,7 @@ async function initializeDb() {
         slack_user_id VARCHAR(255) PRIMARY KEY,
         dashboard_user_id VARCHAR(255) NOT NULL UNIQUE,
         access_token VARCHAR(255) NOT NULL,
+        portal_credentials JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -95,11 +99,100 @@ const upload = multer({ storage: storage });
 // --- Slack Event Listener ---
 slackApp.event('file_shared', async ({ event, client, logger }) => {
   try {
-    // This is where the core logic will go in the next stage.
-    // We will look up the user, download the file, and create a job.
-    console.log(`Received a file_shared event for file: ${event.file_id} from user: ${event.user_id}`);
+    const slackUserId = event.user_id;
+    console.log(`[SLACK-EVENT] Received file_shared event from user: ${slackUserId}`);
+
+    // Step 1: Look up the user's integration details
+    const dbClient = await pool.connect();
+    let integrationDetails;
+    try {
+      const result = await dbClient.query('SELECT * FROM slack_integrations WHERE slack_user_id = $1', [slackUserId]);
+      if (result.rows.length === 0) {
+        console.log(`[SLACK-EVENT] No integration found for Slack user ${slackUserId}. Ignoring event.`);
+        return;
+      }
+      integrationDetails = result.rows[0];
+    } finally {
+      dbClient.release();
+    }
+    
+    // Step 2: Get file info from Slack to get the download URL
+    const fileInfo = await client.files.info({
+      token: integrationDetails.access_token,
+      file: event.file_id,
+    });
+
+    if (!fileInfo.ok || !fileInfo.file.url_private_download) {
+      console.error('[SLACK-EVENT] Could not get file info from Slack:', fileInfo.error);
+      return;
+    }
+
+    // Step 3: Download the image using the authenticated URL
+    const imageUrl = fileInfo.file.url_private_download;
+    const imageResponse = await axios({
+      method: 'get',
+      url: imageUrl,
+      responseType: 'stream',
+      headers: {
+        'Authorization': `Bearer ${integrationDetails.access_token}`,
+      },
+    });
+
+    const fileExtension = path.extname(fileInfo.file.name) || '.jpg';
+    const newFilename = `${Date.now()}-${slackUserId}${fileExtension}`;
+    const imagePath = path.join(uploadDir, newFilename);
+    const writer = fs.createWriteStream(imagePath);
+
+    imageResponse.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
+    console.log(`[SLACK-EVENT] Successfully downloaded file to ${imagePath}`);
+
+    // Step 4: Create a new job in the database
+    // This part assumes we have the user's portal credentials and default settings
+    // In a real app, these would come from the user's profile. We'll use placeholders for now.
+    const portalUser = integrationDetails.portal_credentials ? integrationDetails.portal_credentials.username : 'defaultUser';
+    const portalPass = integrationDetails.portal_credentials ? integrationDetails.portal_credentials.password : 'defaultPass';
+    
+    // For simplicity, we'll use some default settings.
+    const defaultSettings = {
+      interval: 0,
+      cycle: false,
+      displayValue: 'defaultDisplay' // You might want a default display or make this configurable
+    };
+
+    const jobDbClient = await pool.connect();
+    try {
+      await jobDbClient.query(
+        `INSERT INTO jobs (user_id, portal_credentials, images, settings, status, progress, logs)
+         VALUES ($1, $2, $3, $4, 'queued', 'Job created via Slack.', NULL);`,
+        [
+          integrationDetails.dashboard_user_id,
+          JSON.stringify({ username: portalUser, password: portalPass }),
+          JSON.stringify([{ path: imagePath, originalname: fileInfo.file.name }]),
+          JSON.stringify(defaultSettings)
+        ]
+      );
+      console.log(`[SLACK-EVENT] Successfully created job for user ${integrationDetails.dashboard_user_id}`);
+      
+      // Step 5: Send a confirmation message back to Slack
+      await client.chat.postMessage({
+        token: process.env.SLACK_BOT_TOKEN, // Use the main bot token to post
+        channel: event.channel_id,
+        text: `Got it! I've created an upload job for your file: *${fileInfo.file.name}*`
+      });
+
+    } finally {
+      jobDbClient.release();
+    }
+
   } catch (error) {
-    console.error(`Error handling file_shared event: ${error.message}`);
+    console.error(`[SLACK-EVENT] Error handling file_shared event: ${error.message}`);
+    // Optionally send an error message back to the user in Slack
   }
 });
 
@@ -181,10 +274,10 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
     
     // Save the new integration, or update if it already exists for this dashboard user
     await client.query(
-      `INSERT INTO slack_integrations (slack_user_id, dashboard_user_id, access_token)
-       VALUES ($1, $2, $3)
+      `INSERT INTO slack_integrations (slack_user_id, dashboard_user_id, access_token, portal_credentials)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (dashboard_user_id) DO UPDATE SET slack_user_id = $1, access_token = $3;`,
-      [slackUserId, dashboard_user_id, accessToken]
+      [slackUserId, dashboard_user_id, accessToken, null] // We'll add credentials later
     );
 
     console.log(`[SLACK-OAUTH] Successfully linked Slack user ${slackUserId} to dashboard user ${dashboard_user_id}.`);
