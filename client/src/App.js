@@ -568,7 +568,7 @@ export default function App() {
             )}
             
             {activeTab === 'integrations' && (
-              dashboardUser ? <IntegrationsDashboard dashboardUser={dashboardUser} /> : <p className="text-center text-slate-500">Loading user information...</p>
+              dashboardUser ? <IntegrationsDashboard dashboardUser={dashboardUser} portalUser={portalUser} portalPass={portalPass} /> : <p className="text-center text-slate-500">Loading user information...</p>
             )}
             
           </div>

@@ -36,7 +36,8 @@ const pool = new Pool({
 async function initializeDb() {
   const client = await pool.connect();
   try {
-    // TEMPORARY: Drop the table to force recreation with the correct schema.
+    // TEMPORARY: Drop tables to force recreation with the correct schema.
+    await client.query('DROP TABLE IF EXISTS oauth_state;');
     await client.query('DROP TABLE IF EXISTS slack_integrations;');
 
     // Create 'jobs' table if it doesn't exist
@@ -70,6 +71,7 @@ async function initializeDb() {
       CREATE TABLE IF NOT EXISTS oauth_state (
         state_value VARCHAR(255) PRIMARY KEY,
         dashboard_user_id VARCHAR(255) NOT NULL,
+        portal_credentials JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -169,8 +171,8 @@ slackApp.event('file_shared', async ({ event, client, logger }) => {
     // Step 4: Create a new job in the database
     // This part assumes we have the user's portal credentials and default settings
     // In a real app, these would come from the user's profile. We'll use placeholders for now.
-    const portalUser = integrationDetails.portal_credentials ? integrationDetails.portal_credentials.username : 'defaultUser';
-    const portalPass = integrationDetails.portal_credentials ? integrationDetails.portal_credentials.password : 'defaultPass';
+    const portalUser = integrationDetails.portal_credentials.username;
+    const portalPass = integrationDetails.portal_credentials.password;
     
     // For simplicity, we'll use some default settings.
     const defaultSettings = {
@@ -236,25 +238,29 @@ app.post('/api/slack/events', express.json(), (req, res) => {
 // --- Slack OAuth Flow Endpoints ---
 
 // This is the URL the user will be redirected to from the "Add to Slack" button
-app.get('/api/slack/oauth/start', async (req, res) => {
+app.post('/api/slack/oauth/start', jsonBodyParser, async (req, res) => {
   console.log('[SLACK-OAUTH] Received request to start OAuth flow.');
-  const { userId } = req.query;
-  if (!userId) {
-    return res.status(400).send('<h1>Error</h1><p>A user ID must be provided to start the Slack integration.</p>');
+  const { userId, portalUser, portalPass } = req.body;
+
+  if (!userId || !portalUser || !portalPass) {
+    return res.status(400).json({ message: 'User ID and portal credentials are required.' });
   }
 
   const state = crypto.randomBytes(16).toString('hex');
   const client = await pool.connect();
   try {
-    // Store the state and associated user ID for verification later
-    await client.query('INSERT INTO oauth_state (state_value, dashboard_user_id) VALUES ($1, $2)', [state, userId]);
+    const credentials = { username: portalUser, password: portalPass };
+    // NOTE: In a production app, credentials should be encrypted before storing.
+    await client.query(
+      'INSERT INTO oauth_state (state_value, dashboard_user_id, portal_credentials) VALUES ($1, $2, $3)', 
+      [state, userId, JSON.stringify(credentials)]
+    );
     
     const slackAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:history,chat:write,files:read&user_scope=&state=${state}`;
-    res.writeHead(302, { Location: slackAuthUrl });
-    res.end();
+    res.status(200).json({ slackAuthUrl });
   } catch (error) {
     console.error('[SLACK-OAUTH] Error starting OAuth flow:', error);
-    res.status(500).send('<h1>Error</h1><p>Could not start the Slack OAuth process. Please try again.</p>');
+    res.status(500).json({ message: 'Could not start the Slack OAuth process.' });
   } finally {
     client.release();
   }
@@ -271,11 +277,11 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
   const client = await pool.connect();
   try {
     // Verify the state value to prevent CSRF attacks
-    const stateResult = await client.query('SELECT dashboard_user_id FROM oauth_state WHERE state_value = $1', [state]);
+    const stateResult = await client.query('SELECT dashboard_user_id, portal_credentials FROM oauth_state WHERE state_value = $1', [state]);
     if (stateResult.rows.length === 0) {
       return res.status(403).send('<h1>Error</h1><p>Invalid state. Your authorization session may have expired. Please try again.</p>');
     }
-    const { dashboard_user_id } = stateResult.rows[0];
+    const { dashboard_user_id, portal_credentials } = stateResult.rows[0];
 
     // Exchange the temporary code for a permanent access token
     const oauthResult = await slackApp.client.oauth.v2.access({
@@ -291,8 +297,8 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
     await client.query(
       `INSERT INTO slack_integrations (slack_user_id, dashboard_user_id, access_token, portal_credentials)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (dashboard_user_id) DO UPDATE SET slack_user_id = $1, access_token = $3;`,
-      [slackUserId, dashboard_user_id, accessToken, null] // We'll add credentials later
+       ON CONFLICT (dashboard_user_id) DO UPDATE SET slack_user_id = $1, access_token = $3, portal_credentials = $4;`,
+      [slackUserId, dashboard_user_id, accessToken, portal_credentials]
     );
 
     console.log(`[SLACK-OAUTH] Successfully linked Slack user ${slackUserId} to dashboard user ${dashboard_user_id}.`);

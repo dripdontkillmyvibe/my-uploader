@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { User, KeyRound } from 'lucide-react';
 
 // Define the API URL based on the environment, just like in App.js
 const API_URL = process.env.NODE_ENV === 'production' ? process.env.REACT_APP_API_URL : '';
@@ -20,15 +21,40 @@ const SlackLogo = () => (
 );
 
 
-const SlackIntegrationCard = ({ dashboardUser }) => {
-    // This now points to our backend OAuth endpoint, including the user ID
-    const handleConnectClick = () => {
-        // More robust check to ensure we have a non-empty string.
-        if (typeof dashboardUser !== 'string' || dashboardUser.length === 0) {
-            alert("Could not identify the current user. Please try refreshing the page.");
+const SlackIntegrationCard = ({ dashboardUser, portalUser, portalPass }) => {
+    // State to manage the portal credentials input by the user
+    const [localPortalUser, setLocalPortalUser] = useState(portalUser || '');
+    const [localPortalPass, setLocalPortalPass] = useState(portalPass || '');
+    const [isConnecting, setIsConnecting] = useState(false);
+
+    const handleConnectClick = async () => {
+        if (!dashboardUser || !localPortalUser || !localPortalPass) {
+            alert("Please enter your portal username and password to connect Slack.");
             return;
         }
-        window.location.href = `${API_URL}/api/slack/oauth/start?userId=${dashboardUser}`;
+
+        setIsConnecting(true);
+
+        try {
+            const response = await fetch(`${API_URL}/api/slack/oauth/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: dashboardUser,
+                    portalUser: localPortalUser,
+                    portalPass: localPortalPass
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to start Slack connection.');
+            }
+            // Redirect the user to the Slack authorization URL
+            window.location.href = data.slackAuthUrl;
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            setIsConnecting(false);
+        }
     };
 
     return (
@@ -42,23 +68,34 @@ const SlackIntegrationCard = ({ dashboardUser }) => {
                 </div>
                 <button 
                     onClick={handleConnectClick} 
-                    className="bg-[#4A154B] text-white font-bold py-2 px-4 rounded-lg hover:opacity-90 flex items-center"
+                    disabled={isConnecting}
+                    className="bg-[#4A154B] text-white font-bold py-2 px-4 rounded-lg hover:opacity-90 flex items-center disabled:bg-slate-400"
                 >
-                    Add to Slack
+                    {isConnecting ? 'Connecting...' : 'Add to Slack'}
                 </button>
             </div>
             <p className="mt-4 text-sm text-slate-600">
-                Connect your account to enable uploading images directly from a Slack channel. You will be redirected to Slack to authorize the application.
+                Enter your portal credentials below. This is a one-time setup to allow the bot to create upload jobs on your behalf.
             </p>
+            <div className="mt-4 space-y-4">
+                 <div>
+                    <label className="font-medium text-slate-700 block mb-1">Portal Username</label>
+                    <div className="relative"><User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"/><input type="text" value={localPortalUser} onChange={e => setLocalPortalUser(e.target.value)} className="w-full pl-10 p-3 border border-slate-300 rounded-lg"/></div>
+                </div>
+                <div>
+                    <label className="font-medium text-slate-700 block mb-1">Portal Password</label>
+                    <div className="relative"><KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"/><input type="password" value={localPortalPass} onChange={e => setLocalPortalPass(e.target.value)} className="w-full pl-10 p-3 border border-slate-300 rounded-lg"/></div>
+                </div>
+            </div>
         </div>
     );
 };
 
 
-export default function IntegrationsDashboard({ dashboardUser }) {
+export default function IntegrationsDashboard({ dashboardUser, portalUser, portalPass }) {
     return (
         <div className="space-y-8">
-            <SlackIntegrationCard dashboardUser={dashboardUser} />
+            <SlackIntegrationCard dashboardUser={dashboardUser} portalUser={portalUser} portalPass={portalPass} />
             {/* We can add more integrations here in the future */}
         </div>
     );
