@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { User, KeyRound } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { User, KeyRound, CheckCircle } from 'lucide-react';
 
 // Define the API URL based on the environment, just like in App.js
 const API_URL = process.env.NODE_ENV === 'production' ? process.env.REACT_APP_API_URL : '';
@@ -18,6 +18,19 @@ const SlackLogo = () => (
         <path d="m8.5 6.5 3 3"/>
         <path d="m17.5 17.5-3-3"/>
     </svg>
+);
+
+const ConnectedState = ({ slackUserId }) => (
+    <div className="p-6 border rounded-xl bg-green-50 text-green-800 shadow-sm">
+        <div className="flex items-center">
+            <CheckCircle className="w-8 h-8 mr-4 text-green-600"/>
+            <div>
+                <h3 className="font-semibold text-lg">Connected to Slack</h3>
+                <p className="text-sm">Your account is linked to Slack user <span className="font-mono bg-green-100 px-1 rounded">{slackUserId}</span>.</p>
+                <p className="text-sm mt-1">You can now upload images by sharing them in any channel the bot is in.</p>
+            </div>
+        </div>
+    </div>
 );
 
 
@@ -93,6 +106,39 @@ const SlackIntegrationCard = ({ dashboardUser, portalUser, portalPass }) => {
 
 
 export default function IntegrationsDashboard({ dashboardUser, portalUser, portalPass }) {
+    const [integrationStatus, setIntegrationStatus] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchStatus = async () => {
+            if (!dashboardUser) return;
+            try {
+                const response = await fetch(`${API_URL}/api/slack/integration-status?userId=${dashboardUser}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setIntegrationStatus(data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch integration status", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchStatus();
+    }, [dashboardUser]);
+
+    if (isLoading) {
+        return <p className="text-center text-slate-500">Loading integration status...</p>;
+    }
+
+    if (integrationStatus && integrationStatus.isConnected) {
+        return (
+            <div className="space-y-8">
+                <ConnectedState slackUserId={integrationStatus.slackUserId} />
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-8">
             <SlackIntegrationCard dashboardUser={dashboardUser} portalUser={portalUser} portalPass={portalPass} />

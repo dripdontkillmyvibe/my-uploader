@@ -343,6 +343,30 @@ app.get('/api/slack/oauth/callback', async (req, res) => {
 });
 
 
+// --- Slack Integration Status Endpoint ---
+app.get('/api/slack/integration-status', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) {
+    return res.status(400).json({ message: 'User ID is required.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const result = await client.query('SELECT slack_user_id FROM slack_integrations WHERE dashboard_user_id = $1', [userId]);
+    if (result.rows.length > 0) {
+      res.json({ isConnected: true, slackUserId: result.rows[0].slack_user_id });
+    } else {
+      res.json({ isConnected: false });
+    }
+  } catch (error) {
+    console.error(`[SLACK-STATUS] Error checking integration status for ${userId}:`, error);
+    res.status(500).json({ message: 'Failed to get integration status.' });
+  } finally {
+    client.release();
+  }
+});
+
+
 app.post('/api/fetch-displays', jsonBodyParser, async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: 'Username and password are required.' });
