@@ -36,10 +36,6 @@ const pool = new Pool({
 async function initializeDb() {
   const client = await pool.connect();
   try {
-    // TEMPORARY: Drop tables to force recreation with the correct schema.
-    await client.query('DROP TABLE IF EXISTS oauth_state;');
-    await client.query('DROP TABLE IF EXISTS slack_integrations;');
-
     // Create 'jobs' table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -168,17 +164,43 @@ slackApp.event('file_shared', async ({ event, client, logger }) => {
 
     console.log(`[SLACK-EVENT] Successfully downloaded file to ${imagePath}`);
 
-    // Step 4: Create a new job in the database
-    // This part assumes we have the user's portal credentials and default settings
-    // In a real app, these would come from the user's profile. We'll use placeholders for now.
+    // Step 4: Get a valid display value by launching a temporary browser
     const portalUser = integrationDetails.portal_credentials.username;
     const portalPass = integrationDetails.portal_credentials.password;
+    let displayValue;
+
+    let tempBrowser = null;
+    try {
+        console.log(`[SLACK-EVENT] Launching temporary browser to fetch displays for ${portalUser}`);
+        tempBrowser = await puppeteer.launch(puppeteerLaunchOptions);
+        const page = await tempBrowser.newPage();
+        await page.goto(LOGIN_URL, { waitUntil: 'networkidle2' });
+        await page.type(USERNAME_SELECTOR, portalUser);
+        await page.type(PASSWORD_SELECTOR, portalPass);
+        await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2' }), page.click(LOGIN_BUTTON_SELECTOR)]);
+        await page.waitForSelector(DROPDOWN_SELECTOR);
+        
+        // Find the first option in the dropdown that is not the "Select a display" default (value="0")
+        const firstOption = await page.$eval(`${DROPDOWN_SELECTOR} option:not([value="0"])`, opt => opt.value);
+        
+        if (!firstOption) {
+            throw new Error('Could not find any valid displays for the user.');
+        }
+        displayValue = firstOption;
+        console.log(`[SLACK-EVENT] Found valid display value: ${displayValue}`);
+    } catch (e) {
+        console.error(`[SLACK-EVENT] Failed to fetch display value headlessly: ${e.message}`);
+        // TODO: Notify user in Slack about the failure
+        return; // Stop processing if we can't get a display
+    } finally {
+        if (tempBrowser) await tempBrowser.close();
+    }
     
-    // For simplicity, we'll use some default settings.
-    const defaultSettings = {
+    // Use the fetched display value to create the job
+    const jobSettings = {
       interval: 0,
       cycle: false,
-      displayValue: 'defaultDisplay' // You might want a default display or make this configurable
+      displayValue: displayValue
     };
 
     const jobDbClient = await pool.connect();
@@ -190,7 +212,7 @@ slackApp.event('file_shared', async ({ event, client, logger }) => {
           integrationDetails.dashboard_user_id,
           JSON.stringify({ username: portalUser, password: portalPass }),
           JSON.stringify([{ path: imagePath, originalname: fileInfo.file.name }]),
-          JSON.stringify(defaultSettings)
+          JSON.stringify(jobSettings)
         ]
       );
       console.log(`[SLACK-EVENT] Successfully created job for user ${integrationDetails.dashboard_user_id}`);
